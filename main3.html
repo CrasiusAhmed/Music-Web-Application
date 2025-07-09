@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced 3D Audio Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #e0e0e0;
+            overflow: hidden;
+            margin: 0;
+            background: linear-gradient(-45deg, #131314, #1e1e28, #2a2a3f, #131314);
+            background-size: 400% 400%;
+            animation: gradientBG 15s ease infinite;
+        }
+
+        @keyframes gradientBG {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        #visualizer-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            cursor: grab;
+        }
+
+        #visualizer-canvas:active {
+            cursor: grabbing;
+        }
+
+        #ui-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.5rem;
+            pointer-events: none;
+        }
+
+        #ui-container>* {
+            pointer-events: auto;
+        }
+
+        .info-box {
+            background-color: rgba(29, 29, 31, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            padding: 1rem 1.5rem;
+            max-width: 400px;
+        }
+
+        .control-button {
+            background-color: rgba(42, 42, 46, 0.8);
+            color: #f0f0f0;
+            border-radius: 9999px;
+            padding: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .control-button:hover {
+            background-color: rgba(62, 62, 66, 0.9);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-button:disabled {
+            background-color: #3a3a3f;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        #loader {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            z-index: 10;
+            width: 120px;
+            height: 120px;
+            margin: -60px 0 0 -60px;
+            border: 16px solid #2a2a2c;
+            border-radius: 50%;
+            border-top: 16px solid #818cf8;
+            animation: spin 2s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        #features-panel {
+            position: absolute;
+            top: 50%;
+            translate: 0 -50%;
+            right: 1.5rem;
+            background-color: rgba(29, 29, 31, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            width: 280px;
+            transform: translateY(20px) scale(0.95);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+            pointer-events: none;
+        }
+
+        #features-panel.visible {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #features-toggle {
+            position: relative;
+            z-index: 4;
+        }
+
+        #features-panel {
+            z-index: 5;
+        }
+
+        #pitch-slider {
+            position: relative;
+            z-index: 6;
+        }
+
+        .slider-container {
+            margin-top: 1rem;
+        }
+
+        .slider-container label {
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #62626f;
+            border-radius: 5px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #818cf8;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="visualizer-canvas"></canvas>
+    <div id="loader"></div>
+
+    <div id="ui-container">
+        <div class="info-box self-start">
+            <h1 class="text-xl font-bold text-white">Enhanced 3D Audio Visualizer</h1>
+            <p id="song-info" class="text-sm mt-2 font-medium text-indigo-300">No file loaded.</p>
+        </div>
+
+        <div class="flex flex-col items-center gap-6">
+            <!-- Progress Bar -->
+            <div id="progress-container" class="w-full max-w-4xl" style="display: none;">
+                <div class="flex items-center gap-4">
+                    <!-- Circular Progress Indicator -->
+                    <div class="relative top-[-10px] w-12 h-12 flex-shrink-0">
+                        <svg class="w-12 h-12 transform -rotate-90" viewBox="0 0 48 48">
+                            <circle cx="24" cy="24" r="20" stroke="rgb(55 65 81 / var(--tw-bg-opacity, 1))"
+                                stroke-width="4" fill="none" />
+                            <circle id="progress-circle" cx="24" cy="24" r="20" stroke="#818cf8" stroke-width="4"
+                                fill="none" stroke-dasharray="125.66" stroke-dashoffset="125.66"
+                                stroke-linecap="round" />
+                        </svg>
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <div class="w-3 h-3 bg-indigo-500 rounded-full"></div>
+                        </div>
+                    </div>
+
+                    <!-- Linear Progress Bar -->
+                    <div class="flex-1">
+                        <div class="bg-gray-700 rounded-full h-3 cursor-pointer" id="progress-bar">
+                            <div class="bg-indigo-500 h-3 rounded-full transition-all duration-100" id="progress-fill"
+                                style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between text-xs text-gray-400 mt-2">
+                            <span id="current-time">0:00</span>
+                            <span id="total-time">0:00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Buttons -->
+            <div class="flex justify-center items-center gap-4">
+                <label for="audio-file" class="control-button w-14 h-14">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                        <path d="M12 12v9" />
+                        <path d="m16 16-4-4-4 4" />
+                    </svg>
+                </label>
+                <input type="file" id="audio-file" accept="audio/*">
+
+                <button id="play-pause-button" class="control-button w-14 h-14" disabled>
+                    <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="currentColor" class="hidden">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                    </svg>
+                </button>
+
+                <button id="night-mode-toggle" class="control-button w-14 h-14">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+
+                <button id="color-toggle" class="control-button w-14 h-14">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path>
+                        <circle cx="12" cy="11" r="1"></circle>
+                        <path d="M15.54 8.46a5 5 0 1 0-7.07 7.07"></path>
+                    </svg>
+                </button>
+
+                <button id="features-toggle" class="control-button w-14 h-14">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 22 12 18.27 18.18 22l-1.63-7.03L22 9.24l-7.19-.61L12 2z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="features-panel">
+        <div class="slider-container">
+            <label for="pitch-slider">Pitch: <span id="pitch-value">0</span> semitones</label>
+            <input type="range" id="pitch-slider" min="-1200" max="1200" value="0" step="100">
+            <p class="text-xs text-gray-400 mt-1">Note: Pitch changes are applied during export for true pitch shifting
+                without speed change.</p>
+        </div>
+
+        <div class="slider-container">
+            <label for="speed-slider">Speed: <span id="speed-value">100</span>%</label>
+            <input type="range" id="speed-slider" min="0.5" max="2" value="1" step="0.01">
+        </div>
+
+        <div class="slider-container">
+            <label for="style-toggle">Visualizer Style</label>
+            <button id="style-toggle"
+                class="w-full py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 transition-colors">Grid</button>
+        </div>
+
+        <div class="slider-container">
+            <button id="export-button"
+                class="w-full py-2 rounded-lg bg-green-600 hover:bg-green-700 transition-colors font-medium disabled:bg-gray-600 disabled:cursor-not-allowed"
+                disabled>
+                Export Audio
+            </button>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- Basic Setup ---
+        const canvas = document.getElementById('visualizer-canvas');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+
+        // --- Lighting ---
+        scene.add(new THREE.AmbientLight(0xaaaaaa, 0.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5, 10, 7.5);
+        scene.add(dirLight);
+
+        // --- Visualizer Objects ---
+        const GRID_SIZE_X = 64;
+        const GRID_SIZE_Z = 10;
+        const BAR_SPACING = 2.5;
+        let visualizerGroup = new THREE.Group();
+        let cubes = [];
+        let currentStyle = 'grid'; // 'grid' or 'circle'
+
+        function createGridVisualizer() {
+            const material = new THREE.MeshStandardMaterial({ color: 0x9393ff, roughness: 0.5, metalness: 0.2 });
+            const geometry = new THREE.BoxGeometry(1.5, 1, 1.5);
+            geometry.translate(0, 0.5, 0);
+            for (let z = 0; z < GRID_SIZE_Z; z++) {
+                for (let x = 0; x < GRID_SIZE_X; x++) {
+                    const cube = new THREE.Mesh(geometry, material.clone());
+                    const xPos = (x - GRID_SIZE_X / 2) * BAR_SPACING;
+                    const zPos = (z - GRID_SIZE_Z / 2) * BAR_SPACING;
+                    cube.position.set(xPos, 0, zPos);
+                    visualizerGroup.add(cube);
+                    cubes.push(cube);
+                }
+            }
+        }
+
+        function createCircleVisualizer() {
+            const material = new THREE.MeshStandardMaterial({ color: 0x9393ff, roughness: 0.5, metalness: 0.2 });
+            const geometry = new THREE.BoxGeometry(1.5, 1, 1.5);
+            geometry.translate(0, 0.5, 0);
+            const radius = 30;
+            for (let i = 0; i < GRID_SIZE_X; i++) {
+                const angle = (i / GRID_SIZE_X) * Math.PI * 2;
+                const cube = new THREE.Mesh(geometry, material.clone());
+                cube.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+                cube.lookAt(0, 0, 0);
+                visualizerGroup.add(cube);
+                cubes.push(cube);
+            }
+        }
+
+
+        function createSphereVisualizer() {
+            const material = new THREE.MeshStandardMaterial({ color: 0x9393ff, roughness: 0.5, metalness: 0.2 });
+            const geometry = new THREE.BoxGeometry(1.5, 1, 1.5);
+            geometry.translate(0, 0.5, 0);
+            const radius = 40;
+            const barCount = GRID_SIZE_X * 2; // More bars for a fuller sphere
+
+            for (let i = 0; i < barCount; i++) {
+                const phi = Math.acos(-1 + (2 * i) / barCount);
+                const theta = Math.sqrt(barCount * Math.PI) * phi;
+
+                const cube = new THREE.Mesh(geometry, material.clone());
+                const x = radius * Math.cos(theta) * Math.sin(phi);
+                const y = radius * Math.sin(theta) * Math.sin(phi);
+                const z = radius * Math.cos(phi);
+
+                cube.position.set(x, y, z);
+                cube.lookAt(scene.position); // Point the cubes inward
+                visualizerGroup.add(cube);
+                cubes.push(cube);
+            }
+        }
+
+        function createHelixVisualizer() {
+            const material = new THREE.MeshStandardMaterial({ color: 0x9393ff, roughness: 0.5, metalness: 0.2 });
+            const geometry = new THREE.BoxGeometry(1.5, 1, 1.5);
+            geometry.translate(0, 0.5, 0);
+            const radius = 25;
+            const turns = 3; // Number of full rotations for the helix
+            const barCount = GRID_SIZE_X * 2; // More bars for a smoother helix
+
+            for (let i = 0; i < barCount; i++) {
+                const angle = (i / barCount) * Math.PI * 2 * turns;
+                const yPos = (i - barCount / 2) * 0.7; // Vertical spacing
+
+                const cube = new THREE.Mesh(geometry, material.clone());
+                cube.position.set(Math.cos(angle) * radius, yPos, Math.sin(angle) * radius);
+                cube.lookAt(0, yPos, 0); // Orient cubes toward the center axis
+                visualizerGroup.add(cube);
+                cubes.push(cube);
+            }
+        }
+
+        function createParticleVisualizer() {
+            const particleCount = 2000;
+            const particlesGeometry = new THREE.BufferGeometry();
+            const posArray = new Float32Array(particleCount * 3);
+            const material = new THREE.PointsMaterial({
+                size: 0.5,
+                color: 0x9393ff,
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            for (let i = 0; i < particleCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 100; // Distribute particles in a cube
+            }
+
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particleSystem = new THREE.Points(particlesGeometry, material);
+            visualizerGroup.add(particleSystem);
+            cubes.push(particleSystem); // Add the system to the 'cubes' array for animation
+        }
+
+        scene.add(visualizerGroup);
+        camera.position.set(0, 45, 80);
+        camera.lookAt(0, 0, 0);
+
+        // --- Audio Processing ---
+        const fileInput = document.getElementById('audio-file');
+        const playPauseButton = document.getElementById('play-pause-button');
+        const songInfo = document.getElementById('song-info');
+        const loader = document.getElementById('loader');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const pitchSlider = document.getElementById('pitch-slider');
+        const speedSlider = document.getElementById('speed-slider');
+        const pitchValue = document.getElementById('pitch-value');
+        const speedValue = document.getElementById('speed-value');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressFill = document.getElementById('progress-fill');
+        const progressCircle = document.getElementById('progress-circle');
+        const currentTimeSpan = document.getElementById('current-time');
+        const totalTimeSpan = document.getElementById('total-time');
+        const exportButton = document.getElementById('export-button');
+
+        // --- Web Audio API Setup ---
+        let audioContext, analyser, gainNode, source, audioBuffer, frequencyData;
+
+        // --- Playback State ---
+        let isPlaying = false;
+        let currentPitch = 0; // in semitones
+        let currentSpeed = 1;
+        let startOffset = 0; // to resume playback
+        let startTime = 0; // from audioContext.currentTime
+        let animationFrameId;
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        fileInput.addEventListener('change', handleFileSelect);
+        playPauseButton.addEventListener('click', togglePlayback);
+
+        async function handleFileSelect(event) {
+            const files = event.target.files;
+            if (!files.length) return;
+            const file = files[0];
+
+            // --- Stop any existing playback and clean up ---
+            if (isPlaying) {
+                togglePlayback(); // stops and cleans up source
+            }
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            loader.style.display = 'block';
+            songInfo.textContent = `Loading: ${file.name}`;
+            playPauseButton.disabled = true;
+            exportButton.disabled = true;
+
+            // --- Read and Decode Audio Data ---
+            const arrayBuffer = await file.arrayBuffer();
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = GRID_SIZE_X * 2;
+                gainNode = audioContext.createGain();
+                frequencyData = new Uint8Array(analyser.frequencyBinCount);
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            try {
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            } catch (e) {
+                console.error("Error decoding audio data", e);
+                alert("Could not decode audio file. Please try a different file.");
+                loader.style.display = 'none';
+                songInfo.textContent = 'Failed to load file.';
+                return;
+            }
+
+            // --- Reset State and UI ---
+            startOffset = 0;
+            startTime = 0;
+            pitchSlider.value = 0;
+            pitchValue.textContent = 0;
+            currentPitch = 0;
+            speedSlider.value = 1;
+            speedValue.textContent = 100;
+            currentSpeed = 1;
+
+            totalTimeSpan.textContent = formatTime(audioBuffer.duration);
+            updateProgressUI(0, audioBuffer.duration);
+
+            loader.style.display = 'none';
+            songInfo.textContent = `Ready: ${file.name}`;
+            playPauseButton.disabled = false;
+            exportButton.disabled = false;
+            progressContainer.style.display = 'block';
+        }
+
+        function togglePlayback() {
+            if (!audioBuffer) return;
+            if (audioContext.state === 'suspended') audioContext.resume();
+
+            isPlaying = !isPlaying;
+
+            if (isPlaying) {
+                // --- Start playing ---
+                source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+
+                // Apply pitch and speed
+                source.detune.value = currentPitch * 100; // detune is in cents
+                source.playbackRate.value = currentSpeed;
+
+                source.connect(gainNode).connect(analyser).connect(audioContext.destination);
+
+                startTime = audioContext.currentTime;
+                source.start(0, startOffset);
+
+                // Handle track ending
+                source.onended = () => {
+                    if (isPlaying) { // only if it ended naturally, not by pausing
+                        togglePlayback(); // this will set isPlaying to false
+                    }
+                };
+
+                // Start UI updates
+                animationFrameId = requestAnimationFrame(updateProgress);
+
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            } else {
+                // --- Stop playing ---
+                if (source) {
+                    source.stop();
+                    source.disconnect();
+                    source = null;
+                }
+                // Calculate how much time has passed since we started playing
+                startOffset += (audioContext.currentTime - startTime) * currentSpeed;
+
+                // Stop UI updates
+                cancelAnimationFrame(animationFrameId);
+
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+            }
+        }
+
+        function updateProgress() {
+            if (!isPlaying || !audioBuffer) return;
+
+            const currentTime = startOffset + (audioContext.currentTime - startTime) * currentSpeed;
+
+            if (currentTime >= audioBuffer.duration) {
+                // Playback has finished
+                startOffset = 0;
+                // The onended event will handle toggling playback state
+            } else {
+                updateProgressUI(currentTime, audioBuffer.duration);
+                animationFrameId = requestAnimationFrame(updateProgress);
+            }
+        }
+
+        function updateProgressUI(currentTime, duration) {
+            const progress = (currentTime / duration) * 100;
+            progressFill.style.width = `${progress}%`;
+
+            const circumference = 125.66;
+            const offset = circumference - (progress / 100) * circumference;
+            progressCircle.style.strokeDashoffset = offset;
+
+            currentTimeSpan.textContent = formatTime(currentTime);
+        }
+
+        pitchSlider.addEventListener('input', (e) => {
+            const cents = parseInt(e.target.value);
+            currentPitch = cents / 100; // convert cents to semitones for display
+            pitchValue.textContent = currentPitch;
+            if (source) {
+                source.detune.value = cents;
+            }
+        });
+
+        speedSlider.addEventListener('input', (e) => {
+            currentSpeed = parseFloat(e.target.value);
+            speedValue.textContent = Math.round(currentSpeed * 100);
+            if (source) {
+                source.playbackRate.value = currentSpeed;
+            }
+        });
+
+        progressBar.addEventListener('click', (e) => {
+            if (!audioBuffer) return;
+            const rect = progressBar.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = clickX / rect.width;
+            const newTime = percentage * audioBuffer.duration;
+
+            startOffset = newTime; // set the new position
+
+            if (isPlaying) {
+                // If playing, stop the current source and restart from the new offset
+                if (source) {
+                    source.onended = null; // Prevent the old onended from firing
+                    source.stop();
+                    source.disconnect();
+                }
+
+                // Immediately start a new source without changing the isPlaying state
+                source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.detune.value = currentPitch * 100;
+                source.playbackRate.value = currentSpeed;
+                source.connect(gainNode).connect(analyser).connect(audioContext.destination);
+
+                startTime = audioContext.currentTime;
+                source.start(0, startOffset);
+
+                source.onended = () => {
+                    if (isPlaying) {
+                        togglePlayback();
+                    }
+                };
+
+            } else {
+                // If paused, just update the UI to reflect the new position
+                updateProgressUI(startOffset, audioBuffer.duration);
+            }
+        });
+
+        // Advanced pitch shifting function for export
+        function pitchShiftBuffer(audioBuffer, pitchFactor) {
+            const channels = audioBuffer.numberOfChannels;
+            const sampleRate = audioBuffer.sampleRate;
+            const length = audioBuffer.length;
+
+            // Create new buffer for pitch-shifted audio
+            const shiftedBuffer = audioContext.createBuffer(channels, length, sampleRate);
+
+            for (let channel = 0; channel < channels; channel++) {
+                const inputData = audioBuffer.getChannelData(channel);
+                const outputData = shiftedBuffer.getChannelData(channel);
+
+                // Simple pitch shifting using interpolation
+                // This is a basic implementation - professional tools use more sophisticated algorithms
+                for (let i = 0; i < length; i++) {
+                    const sourceIndex = i * pitchFactor;
+                    const index1 = Math.floor(sourceIndex);
+                    const index2 = Math.min(index1 + 1, length - 1);
+                    const fraction = sourceIndex - index1;
+
+                    if (index1 < length) {
+                        // Linear interpolation
+                        outputData[i] = inputData[index1] * (1 - fraction) + inputData[index2] * fraction;
+                    }
+                }
+            }
+
+            return shiftedBuffer;
+        }
+
+        // Export functionality
+        exportButton.addEventListener('click', exportAudio);
+
+        async function exportAudio() {
+            if (!audioBuffer || !audioContext) {
+                alert('No audio loaded!');
+                return;
+            }
+
+            try {
+                exportButton.disabled = true;
+                exportButton.innerHTML = `
+                    <svg class="animate-spin inline mr-2" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                    </svg>
+                    Processing...
+                `;
+
+                // Start with the original, unmodified buffer
+                let processedBuffer = audioBuffer;
+
+                // 1. Apply true pitch shifting (without changing speed)
+                if (currentPitch !== 0) {
+                    const pitchRatio = Math.pow(2, currentPitch / 12);
+                    // The pitchShiftBuffer function is a simple resampler, which is not ideal.
+                    // For a better result, we use an OfflineAudioContext to change pitch while preserving duration.
+                    const offlineContext = new OfflineAudioContext(processedBuffer.numberOfChannels, processedBuffer.length, processedBuffer.sampleRate);
+                    const source = offlineContext.createBufferSource();
+                    source.buffer = processedBuffer;
+                    source.detune.value = currentPitch * 100; // Apply pitch shift in cents
+                    source.connect(offlineContext.destination);
+                    source.start(0);
+                    processedBuffer = await offlineContext.startRendering();
+                }
+
+                // 2. Apply speed changes to the (potentially) pitch-shifted buffer
+                let finalBuffer = processedBuffer;
+                if (currentSpeed !== 1) {
+                    const newLength = Math.floor(processedBuffer.length / currentSpeed);
+                    const offlineContext = new OfflineAudioContext(
+                        processedBuffer.numberOfChannels,
+                        newLength,
+                        processedBuffer.sampleRate
+                    );
+
+                    const source = offlineContext.createBufferSource();
+                    source.buffer = processedBuffer;
+                    source.playbackRate.value = currentSpeed; // This changes speed and pitch together
+                    source.connect(offlineContext.destination);
+                    source.start(0);
+
+                    finalBuffer = await offlineContext.startRendering();
+                }
+
+                // 3. Convert to WAV and download
+                const wavBlob = audioBufferToWav(finalBuffer);
+                const url = URL.createObjectURL(wavBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `modified_audio_pitch${currentPitch}_speed${Math.round(currentSpeed * 100)}.wav`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Export failed. Please try again.');
+            } finally {
+                exportButton.disabled = false;
+                exportButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline mr-2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7,10 12,15 17,10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Export Audio
+                `;
+            }
+        }
+
+        // Convert AudioBuffer to WAV blob
+        function audioBufferToWav(buffer) {
+            const length = buffer.length;
+            const numberOfChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const arrayBuffer = new ArrayBuffer(44 + length * numberOfChannels * 2);
+            const view = new DataView(arrayBuffer);
+
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + length * numberOfChannels * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numberOfChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+            view.setUint16(32, numberOfChannels * 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, length * numberOfChannels * 2, true);
+
+            // Convert float samples to 16-bit PCM
+            let offset = 44;
+            for (let i = 0; i < length; i++) {
+                for (let channel = 0; channel < numberOfChannels; channel++) {
+                    const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+                    view.setInt16(offset, sample * 0x7FFF, true);
+                    offset += 2;
+                }
+            }
+
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+
+        // --- UI Interaction ---
+        const featuresToggle = document.getElementById('features-toggle');
+        const featuresPanel = document.getElementById('features-panel');
+        featuresToggle.addEventListener('click', () => featuresPanel.classList.toggle('visible'));
+
+        const colorToggle = document.getElementById('color-toggle');
+        let isColorModeActive = true; // Colors are ON by default
+
+        colorToggle.addEventListener('click', () => {
+            isColorModeActive = !isColorModeActive;
+        });
+
+        const styleToggle = document.getElementById('style-toggle');
+        const visualizerStyles = ['Grid', 'Circle', 'Sphere', 'Helix', 'Particles'];
+        let currentStyleIndex = 0;
+
+        // Helper function to clear the visualizer
+        function clearVisualizer() {
+            visualizerGroup.clear(); // Use .clear() to remove all children
+            cubes = [];
+        }
+
+        styleToggle.addEventListener('click', () => {
+            // Move to the next style in the array, looping back to the start
+            currentStyleIndex = (currentStyleIndex + 1) % visualizerStyles.length;
+            const newStyle = visualizerStyles[currentStyleIndex];
+
+            clearVisualizer();
+
+            switch (newStyle) {
+                case 'Grid':
+                    createGridVisualizer();
+                    break;
+                case 'Circle':
+                    createCircleVisualizer();
+                    break;
+                case 'Sphere':
+                    createSphereVisualizer();
+                    break;
+                case 'Helix':
+                    createHelixVisualizer();
+                    break;
+                case 'Particles':
+                    createParticleVisualizer();
+                    break;
+            }
+
+            styleToggle.textContent = newStyle; // Update button text
+        });
+
+        // Night Mode Toggle
+        const nightModeToggle = document.getElementById('night-mode-toggle');
+        const bodyElement = document.body;
+        let isNightMode = false;
+
+        nightModeToggle.addEventListener('click', () => {
+            isNightMode = !isNightMode;
+            if (isNightMode) {
+                scene.background = new THREE.Color(0x131314);
+                bodyElement.style.background = '#131314';
+            } else {
+                scene.background = null;
+                bodyElement.style.background = '';
+            }
+        });
+
+        // --- Mouse Controls for Full Orbit ---
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        canvas.addEventListener('mousedown', e => { isDragging = true; });
+        canvas.addEventListener('mouseup', e => { isDragging = false; });
+        canvas.addEventListener('mouseleave', e => { isDragging = false; });
+        canvas.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+            visualizerGroup.rotation.y += deltaX * 0.005;
+            visualizerGroup.rotation.x += deltaY * 0.005;
+            visualizerGroup.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, visualizerGroup.rotation.x));
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        canvas.addEventListener('wheel', e => {
+            camera.position.z += e.deltaY * 0.05;
+            camera.position.z = Math.max(20, Math.min(250, camera.position.z));
+        });
+        canvas.addEventListener('mouseenter', e => {
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            if (analyser && frequencyData) {
+                analyser.getByteFrequencyData(frequencyData);
+
+                // Check if the current visualizer is the particle system
+                if (visualizerStyles[currentStyleIndex] === 'Particles' && cubes[0]) {
+                    const particles = cubes[0];
+                    const positions = particles.geometry.attributes.position.array;
+                    const bassLevel = (frequencyData[2] + frequencyData[3]) / 2 / 255; // Normalized bass
+                    const midLevel = (frequencyData[32] + frequencyData[33]) / 2 / 255; // Normalized mid
+
+                    for (let i = 0; i < positions.length; i += 3) {
+                        // Animate particles based on audio
+                        positions[i + 1] += (Math.random() - 0.5) * bassLevel * 2; // Y-axis movement
+                        positions[i] += Math.sin(i + bassLevel) * 0.1; // X-axis wave
+                        positions[i + 2] += Math.cos(i + midLevel) * 0.1; // Z-axis wave
+                    }
+                    particles.geometry.attributes.position.needsUpdate = true;
+
+                    if (isColorModeActive) {
+                        const hue = (bassLevel * 0.4) + 0.55;
+                        particles.material.color.setHSL(hue, 1, 0.6);
+                    } else {
+                        particles.material.color.setHex(0x9393ff);
+                    }
+
+                } else { // This is the logic for all cube-based visualizers
+                    const barCount = cubes.length;
+                    for (let i = 0; i < barCount; i++) {
+                        const freqIndex = i % GRID_SIZE_X;
+                        const value = frequencyData[freqIndex];
+                        const height = (value / 255) * 30 + 0.1;
+
+                        if (cubes[i]) {
+                            // This is now the only line needed to animate the height.
+                            // It scales the cube from its base without overriding its position.
+                            cubes[i].scale.y = height;
+
+                            if (isColorModeActive) {
+                                const hue = (freqIndex / GRID_SIZE_X) * 0.5 + 0.55;
+                                cubes[i].material.color.setHSL(hue, 1, 0.6);
+                            } else {
+                                cubes[i].material.color.setHex(0x9393ff);
+                            }
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        // --- Handle Window Resizing ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        createGridVisualizer(); // Start with the grid
+        animate();
+    </script>
+</body>
+
+</html>

@@ -8,7 +8,8 @@ like pitch shifting and audio export.
 
 
 if you want to learn how it's created Check Out our Youtube Channel:
-Crasius
+Crasius </br>
+https://www.youtube.com/watch?v=MKFRgS1-PHw
 
 please Support Us As Always :)
 
